@@ -1,8 +1,7 @@
 // /api/trigger-handler.js
 
-export const config = {
-  runtime: "nodejs20.x"
-};
+export const runtime = "nodejs";
+
 
 import axios from "axios";
 

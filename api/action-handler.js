@@ -1,8 +1,7 @@
 // /api/action-handler.js
 
-export const config = {
-  runtime: "nodejs20.x"
-};
+export const runtime = "nodejs";
+
 
 import { NextResponse } from "next/server";
 import axios from "axios";
