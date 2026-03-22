@@ -1,6 +1,9 @@
 {
-  "name": "tjp-subitem-sync-v1.1.1",
+  "name": "tjp-subitem-sync",
   "version": "1.0.0",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "axios": "^1.13.6"
   }
