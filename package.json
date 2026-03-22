@@ -1,5 +1,5 @@
 {
-  "name": "tjp-subitem-sync",
+  "name": "tjp-subitem-sync-v1.1",
   "version": "1.0.0",
   "scripts": {
     "build": "echo 'No build step'"
