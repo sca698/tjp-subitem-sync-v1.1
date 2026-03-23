@@ -1,18 +1,15 @@
-// /api/action-handler.js
+// netlify/functions/action-handler.js
 
-export const runtime = "nodejs";
-
-
-import { NextResponse } from "next/server";
 import axios from "axios";
 
 const MONDAY_API_URL = "https://api.monday.com/v2";
 const API_KEY = process.env.MONDAY_API_KEY;
 
-export async function POST(req) {
+export const handler = async (event, context) => {
   try {
-    const body = await req.json();
-    const { itemId, boardId, parentColumn, subitemColumn } = body.payload.inputFields;
+    const body = JSON.parse(event.body);
+    const { itemId, boardId, parentColumn, subitemColumn } =
+      body.payload.inputFields;
 
     // 1. Fetch parent item to get the new status value
     const parentQuery = `
@@ -61,9 +58,17 @@ export async function POST(req) {
       );
     }
 
-    return NextResponse.json({ ok: true });
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ ok: true })
+    };
+
   } catch (err) {
     console.error("Action handler error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: err.message })
+    };
   }
-}
+};

@@ -1,35 +1,40 @@
-// /api/trigger-handler.js
-
-export const runtime = "nodejs";
-
+// netlify/functions/trigger-handler.js
 
 import axios from "axios";
 
-export default async function handler(req, res) {
+export const handler = async (event, context) => {
   try {
-    const body = req.body;
+    const body = JSON.parse(event.body);
 
     // Monday sends a "challenge" during subscription
     if (body.type === "url_verification") {
-      return res.status(200).json({ challenge: body.challenge });
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ challenge: body.challenge })
+      };
     }
 
     // Subscription event
     if (body.type === "subscribe") {
-      return res.status(200).json({
-        webhookUrl: "https://tjp-subitem-sync.vercel.app/api/trigger-handler"
-      });
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          webhookUrl: `${process.env.URL}/.netlify/functions/trigger-handler`
+        })
+      };
     }
 
     // Unsubscribe event
     if (body.type === "unsubscribe") {
-      return res.status(200).json({ ok: true });
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ ok: true })
+      };
     }
 
     // Webhook event: a column changed
     if (body.event) {
       const { boardId, itemId, columnId } = body.event;
-
       const { parentColumn } = body.payload.inputFields;
 
       // Only emit the trigger if the selected parent column changed
@@ -41,12 +46,23 @@ export default async function handler(req, res) {
         });
       }
 
-      return res.status(200).json({ ok: true });
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ ok: true })
+      };
     }
 
-    return res.status(200).json({ ok: true });
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ ok: true })
+    };
+
   } catch (err) {
     console.error("Trigger handler error:", err);
-    return res.status(500).json({ error: err.message });
+
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: err.message })
+    };
   }
-}
+};
