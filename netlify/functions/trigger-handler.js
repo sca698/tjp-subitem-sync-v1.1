@@ -14,15 +14,19 @@ export const handler = async (event, context) => {
       };
     }
 
-    // Subscription event
-    if (body.type === "subscribe") {
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          webhookUrl: `${process.env.URL}/.netlify/functions/trigger-handler`
-        })
-      };
-    }
+// Subscription event
+if (body.type === "subscribe") {
+  const baseUrl =
+    event.headers["x-forwarded-proto"] + "://" + event.headers.host;
+
+  return {
+    statusCode: 200,
+    body: JSON.stringify({
+      webhookUrl: `${baseUrl}/.netlify/functions/trigger-handler`
+    })
+  };
+}
+
 
     // Unsubscribe event
     if (body.type === "unsubscribe") {
