@@ -1,72 +1,55 @@
-// netlify/functions/trigger-handler.js
-
 import axios from "axios";
 
 export const handler = async (event, context) => {
   try {
     const body = JSON.parse(event.body);
+    const { itemId, boardId, columnId } = body.payload;
 
-    // Monday sends a "challenge" during subscription
-    if (body.type === "url_verification") {
-      return {
-        statusCode: 200,
-        body: JSON.stringify({ challenge: body.challenge })
-      };
-    }
-
-// Subscription event
-if (body.type === "subscribe") {
-  const baseUrl =
-    event.headers["x-forwarded-proto"] + "://" + event.headers.host;
-
-  return {
-    statusCode: 200,
-    body: JSON.stringify({
-      webhookUrl: `${baseUrl}/.netlify/functions/trigger-handler`
-    })
-  };
-}
-
-
-    // Unsubscribe event
-    if (body.type === "unsubscribe") {
-      return {
-        statusCode: 200,
-        body: JSON.stringify({ ok: true })
-      };
-    }
-
-    // Webhook event: a column changed
-    if (body.event) {
-      const { boardId, itemId, columnId } = body.event;
-      const { parentColumn } = body.payload.inputFields;
-
-      // Only emit the trigger if the selected parent column changed
-      if (columnId === parentColumn) {
-        await axios.post(body.payload.url, {
-          itemId,
-          boardId,
-          parentColumn
-        });
+    // 1. Fetch subitems for this parent item
+    const query = `
+      query ($itemId: [ID!]) {
+        items (ids: $itemId) {
+          subitems {
+            id
+          }
+        }
       }
+    `;
 
-      return {
-        statusCode: 200,
-        body: JSON.stringify({ ok: true })
-      };
-    }
+    const variables = { itemId };
 
+    const response = await axios.post(
+      "https://api.monday.com/v2",
+      { query, variables },
+      {
+        headers: {
+          Authorization: process.env.MONDAY_API_KEY,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    const subitems = response.data.data.items[0].subitems || [];
+
+    // 2. Extract subitem IDs
+    const subitemids = subitems.map(s => s.id);
+
+    // 3. Return trigger output fields
     return {
       statusCode: 200,
-      body: JSON.stringify({ ok: true })
+      body: JSON.stringify({
+        itemId,
+        boardId,
+        columnId,
+        subitemids   // <-- This is the new field Monday needs
+      })
     };
 
-  } catch (err) {
-    console.error("Trigger handler error:", err);
-
+  } catch (error) {
+    console.error("Trigger handler error:", error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: err.message })
+      body: JSON.stringify({ error: "Trigger handler failed" })
     };
   }
 };
