@@ -7,63 +7,28 @@ exports.handler = async (event) => {
   try {
     const body = JSON.parse(event.body || '{}');
     const payload = body.payload || body;
-    const dep = payload.dependencyData || {};
 
-    // Get parent boardId from any place monday might send it
-    let parentBoardId = dep.subitemsBoardId || dep.boardId || payload.boardId || payload.contextBoardId;
+    // Try to get any boardId monday provides (context or dependency)
+    let boardId = payload.boardId || payload.contextBoardId || 
+                  (payload.dependencyData && payload.dependencyData.boardId);
 
-    console.log('Parent boardId received:', parentBoardId);
-
-    if (!parentBoardId) {
-      console.error('No parent boardId found');
-      return { statusCode: 400, body: JSON.stringify({ error: 'boardId required' }) };
+    // Fallback to your known parent board ID (the one you used when it worked before)
+    if (!boardId) {
+      boardId = "18404010318";   // ← CHANGE THIS to your actual parent board ID
+      console.log('No boardId from monday — using fallback parent board:', boardId);
+    } else {
+      console.log('Using boardId from monday:', boardId);
     }
 
     const token = process.env.MONDAY_API_TOKEN;
     if (!token) {
-      console.error('MONDAY_API_TOKEN is missing');
+      console.error('MONDAY_API_TOKEN missing');
       return { statusCode: 500, body: JSON.stringify({ error: 'Token missing' }) };
     }
 
-    // Try to resolve the REAL subitems board ID
-    let finalBoardId = parentBoardId; // fallback
-
-    const subitemsQuery = `
+    const query = `
       query {
-        boards(ids: [${parentBoardId}]) {
-          columns(types: [subtasks]) {
-            settings_str
-          }
-        }
-      }
-    `;
-
-    let res = await fetch('https://api.monday.com/v2', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': token },
-      body: JSON.stringify({ query: subitemsQuery })
-    });
-
-    let data = await res.json();
-    console.log('Subitems resolution query result:', JSON.stringify(data, null, 2));
-
-    const subitemsColumn = data.data?.boards?.[0]?.columns?.[0];
-    if (subitemsColumn && subitemsColumn.settings_str) {
-      try {
-        const settings = JSON.parse(subitemsColumn.settings_str);
-        finalBoardId = settings.boardId || (settings.boardIds && settings.boardIds[0]);
-        console.log('Resolved subitems boardId:', finalBoardId);
-      } catch (e) {
-        console.error('Failed to parse settings_str:', e);
-      }
-    } else {
-      console.log('No subitems column found or no settings_str — using parent board as fallback');
-    }
-
-    // Now fetch columns from the final (subitems) board
-    const columnsQuery = `
-      query {
-        boards(ids: [${finalBoardId}]) {
+        boards(ids: [${boardId}]) {
           columns {
             id
             title
@@ -73,21 +38,24 @@ exports.handler = async (event) => {
       }
     `;
 
-    res = await fetch('https://api.monday.com/v2', {
+    const res = await fetch('https://api.monday.com/v2', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': token },
-      body: JSON.stringify({ query: columnsQuery })
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token,
+      },
+      body: JSON.stringify({ query }),
     });
 
-    data = await res.json();
-    console.log('Columns query result:', JSON.stringify(data, null, 2));
+    const data = await res.json();
+    console.log('GraphQL result:', JSON.stringify(data));
 
     const columns = data.data?.boards?.[0]?.columns || [];
     const statusColumns = columns
       .filter(col => col.type === 'status')
       .map(col => ({ value: col.id, title: col.title }));
 
-    console.log(`Returning ${statusColumns.length} subitem status columns`);
+    console.log(`Returning ${statusColumns.length} status columns`);
 
     return {
       statusCode: 200,
@@ -96,7 +64,7 @@ exports.handler = async (event) => {
     };
 
   } catch (err) {
-    console.error('CRITICAL ERROR:', err);
+    console.error('ERROR in endpoint:', err.message);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: err.message })
