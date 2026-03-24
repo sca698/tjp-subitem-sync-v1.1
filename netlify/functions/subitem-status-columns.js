@@ -2,56 +2,65 @@
 const fetch = require('node-fetch');
 
 exports.handler = async (event) => {
-  console.log('=== REMOTE OPTIONS ENDPOINT CALLED ===', JSON.stringify(event.body || event));
+  console.log('=== REMOTE OPTIONS CALLED ===', JSON.stringify(event.body || event));
 
   try {
     const body = JSON.parse(event.body || '{}');
     const payload = body.payload || body;
     const dep = payload.dependencyData || {};
 
-    // Get parent boardId from anywhere monday might send it
+    // Get parent boardId from any place monday might send it
     let parentBoardId = dep.subitemsBoardId || dep.boardId || payload.boardId || payload.contextBoardId;
 
+    console.log('Parent boardId received:', parentBoardId);
+
     if (!parentBoardId) {
-      console.error('No parent boardId received');
+      console.error('No parent boardId found');
       return { statusCode: 400, body: JSON.stringify({ error: 'boardId required' }) };
     }
 
-    console.log('Parent boardId:', parentBoardId);
+    const token = process.env.MONDAY_API_TOKEN;
+    if (!token) {
+      console.error('MONDAY_API_TOKEN is missing');
+      return { statusCode: 500, body: JSON.stringify({ error: 'Token missing' }) };
+    }
 
-    const mondayToken = process.env.MONDAY_API_TOKEN;
+    // Try to resolve the REAL subitems board ID
+    let finalBoardId = parentBoardId; // fallback
 
-    // Step 1: Find the REAL subitems board ID
     const subitemsQuery = `
       query {
         boards(ids: [${parentBoardId}]) {
-          columns(ids: ["subitems", "subitems0", "subitems1", "subitems2"]) {  // try common IDs
-            id
+          columns(types: [subtasks]) {
             settings_str
           }
         }
       }
     `;
 
-    let response = await fetch('https://api.monday.com/v2', {
+    let res = await fetch('https://api.monday.com/v2', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': mondayToken },
+      headers: { 'Content-Type': 'application/json', 'Authorization': token },
       body: JSON.stringify({ query: subitemsQuery })
     });
 
-    let result = await response.json();
-    let subitemsColumn = result.data?.boards?.[0]?.columns?.find(c => c.settings_str);
+    let data = await res.json();
+    console.log('Subitems resolution query result:', JSON.stringify(data, null, 2));
 
-    let subitemsBoardId = null;
+    const subitemsColumn = data.data?.boards?.[0]?.columns?.[0];
     if (subitemsColumn && subitemsColumn.settings_str) {
-      const settings = JSON.parse(subitemsColumn.settings_str);
-      subitemsBoardId = settings.boardIds ? settings.boardIds[0] : settings.boardId;
+      try {
+        const settings = JSON.parse(subitemsColumn.settings_str);
+        finalBoardId = settings.boardId || (settings.boardIds && settings.boardIds[0]);
+        console.log('Resolved subitems boardId:', finalBoardId);
+      } catch (e) {
+        console.error('Failed to parse settings_str:', e);
+      }
+    } else {
+      console.log('No subitems column found or no settings_str — using parent board as fallback');
     }
 
-    const finalBoardId = subitemsBoardId || parentBoardId;  // fallback to parent if no subitems board found
-    console.log('Using subitems boardId:', finalBoardId);
-
-    // Step 2: Get ONLY status columns from the subitems board
+    // Now fetch columns from the final (subitems) board
     const columnsQuery = `
       query {
         boards(ids: [${finalBoardId}]) {
@@ -64,18 +73,21 @@ exports.handler = async (event) => {
       }
     `;
 
-    response = await fetch('https://api.monday.com/v2', {
+    res = await fetch('https://api.monday.com/v2', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': mondayToken },
+      headers: { 'Content-Type': 'application/json', 'Authorization': token },
       body: JSON.stringify({ query: columnsQuery })
     });
 
-    result = await response.json();
-    const columns = result.data?.boards?.[0]?.columns || [];
+    data = await res.json();
+    console.log('Columns query result:', JSON.stringify(data, null, 2));
 
+    const columns = data.data?.boards?.[0]?.columns || [];
     const statusColumns = columns
       .filter(col => col.type === 'status')
       .map(col => ({ value: col.id, title: col.title }));
+
+    console.log(`Returning ${statusColumns.length} subitem status columns`);
 
     return {
       statusCode: 200,
@@ -83,11 +95,11 @@ exports.handler = async (event) => {
       body: JSON.stringify({ options: statusColumns })
     };
 
-  } catch (error) {
-    console.error('Remote options error:', error);
+  } catch (err) {
+    console.error('CRITICAL ERROR:', err);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: error.message })
+      body: JSON.stringify({ error: err.message })
     };
   }
 };
