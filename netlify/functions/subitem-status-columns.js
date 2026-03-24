@@ -5,13 +5,14 @@ exports.handler = async (event) => {
   console.log('=== REMOTE OPTIONS CALLED ===', JSON.stringify(event.body || event));
 
   try {
-    const boardId = "18404010318";   // ← Your parent board ID (change only if needed)
+    // Hard-coded to your known parent board ID for now
+    const boardId = "18404010318";
 
-    console.log('Using fixed parent boardId:', boardId);
+    console.log('Using boardId:', boardId);
 
     const token = process.env.MONDAY_API_TOKEN;
     if (!token) {
-      console.error('MONDAY_API_TOKEN missing');
+      console.error('MONDAY_API_TOKEN is missing');
       return { statusCode: 500, body: JSON.stringify({ error: 'Token missing' }) };
     }
 
@@ -53,7 +54,7 @@ exports.handler = async (event) => {
     };
 
   } catch (err) {
-    console.error('ERROR:', err.message);
+    console.error('ERROR in remote options:', err.message);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: err.message })
