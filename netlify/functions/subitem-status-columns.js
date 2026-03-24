@@ -5,20 +5,9 @@ exports.handler = async (event) => {
   console.log('=== REMOTE OPTIONS CALLED ===', JSON.stringify(event.body || event));
 
   try {
-    const body = JSON.parse(event.body || '{}');
-    const payload = body.payload || body;
+    const boardId = "18404010318";   // ← Your parent board ID (change only if needed)
 
-    // Try to get any boardId monday provides (context or dependency)
-    let boardId = payload.boardId || payload.contextBoardId || 
-                  (payload.dependencyData && payload.dependencyData.boardId);
-
-    // Fallback to your known parent board ID (the one you used when it worked before)
-    if (!boardId) {
-      boardId = "18404010318";   // ← CHANGE THIS to your actual parent board ID
-      console.log('No boardId from monday — using fallback parent board:', boardId);
-    } else {
-      console.log('Using boardId from monday:', boardId);
-    }
+    console.log('Using fixed parent boardId:', boardId);
 
     const token = process.env.MONDAY_API_TOKEN;
     if (!token) {
@@ -64,7 +53,7 @@ exports.handler = async (event) => {
     };
 
   } catch (err) {
-    console.error('ERROR in endpoint:', err.message);
+    console.error('ERROR:', err.message);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: err.message })
