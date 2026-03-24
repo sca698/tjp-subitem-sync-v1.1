@@ -1,34 +1,60 @@
+// netlify/functions/subitem-status-columns.js
+const fetch = require('node-fetch');
+
 exports.handler = async (event) => {
   console.log('=== REMOTE OPTIONS ENDPOINT CALLED ===', JSON.stringify(event.body || event));
 
   try {
     const body = JSON.parse(event.body || '{}');
     const payload = body.payload || body;
+    const dep = payload.dependencyData || {};
 
-    // HARD-CODED BOARD ID FOR TESTING — replace with a real board ID that has subitems + status columns
-    const boardId = "18404010318";   // ← CHANGE THIS LINE
+    // Get parent boardId from anywhere monday might send it
+    let parentBoardId = dep.subitemsBoardId || dep.boardId || payload.boardId || payload.contextBoardId;
 
-    console.log('Using hard-coded boardId:', boardId);
-
-    if (!boardId) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: 'No boardId provided' })
-      };
+    if (!parentBoardId) {
+      console.error('No parent boardId received');
+      return { statusCode: 400, body: JSON.stringify({ error: 'boardId required' }) };
     }
 
-    // Rest of your existing code (GraphQL query, filter status columns, return options)
+    console.log('Parent boardId:', parentBoardId);
+
     const mondayToken = process.env.MONDAY_API_TOKEN;
-    if (!mondayToken) {
-      return {
-        statusCode: 500,
-        body: JSON.stringify({ error: 'MONDAY_API_TOKEN missing' })
-      };
+
+    // Step 1: Find the REAL subitems board ID
+    const subitemsQuery = `
+      query {
+        boards(ids: [${parentBoardId}]) {
+          columns(ids: ["subitems", "subitems0", "subitems1", "subitems2"]) {  // try common IDs
+            id
+            settings_str
+          }
+        }
+      }
+    `;
+
+    let response = await fetch('https://api.monday.com/v2', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': mondayToken },
+      body: JSON.stringify({ query: subitemsQuery })
+    });
+
+    let result = await response.json();
+    let subitemsColumn = result.data?.boards?.[0]?.columns?.find(c => c.settings_str);
+
+    let subitemsBoardId = null;
+    if (subitemsColumn && subitemsColumn.settings_str) {
+      const settings = JSON.parse(subitemsColumn.settings_str);
+      subitemsBoardId = settings.boardIds ? settings.boardIds[0] : settings.boardId;
     }
 
-    const query = `
+    const finalBoardId = subitemsBoardId || parentBoardId;  // fallback to parent if no subitems board found
+    console.log('Using subitems boardId:', finalBoardId);
+
+    // Step 2: Get ONLY status columns from the subitems board
+    const columnsQuery = `
       query {
-        boards(ids: [${boardId}]) {
+        boards(ids: [${finalBoardId}]) {
           columns {
             id
             title
@@ -38,44 +64,27 @@ exports.handler = async (event) => {
       }
     `;
 
-    const response = await fetch('https://api.monday.com/v2', {
+    response = await fetch('https://api.monday.com/v2', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': mondayToken,
-      },
-      body: JSON.stringify({ query }),
+      headers: { 'Content-Type': 'application/json', 'Authorization': mondayToken },
+      body: JSON.stringify({ query: columnsQuery })
     });
 
-    const result = await response.json();
-
-    if (result.errors) {
-      console.error('GraphQL errors:', result.errors);
-      return {
-        statusCode: 500,
-        body: JSON.stringify({ error: 'GraphQL failed', details: result.errors })
-      };
-    }
-
+    result = await response.json();
     const columns = result.data?.boards?.[0]?.columns || [];
 
     const statusColumns = columns
       .filter(col => col.type === 'status')
-      .map(col => ({
-        value: col.id,
-        title: col.title,
-      }));
+      .map(col => ({ value: col.id, title: col.title }));
 
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        options: statusColumns,
-      }),
+      body: JSON.stringify({ options: statusColumns })
     };
 
   } catch (error) {
-    console.error('Error in subitem-status-columns:', error);
+    console.error('Remote options error:', error);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: error.message })
