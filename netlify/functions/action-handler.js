@@ -1,74 +1,105 @@
-// netlify/functions/action-handler.js
+// netlify/functions/action-update-subitem-status.js
+const fetch = require('node-fetch');
 
-import axios from "axios";
+const MONDAY_API_TOKEN = process.env.MONDAY_API_TOKEN;
 
-const MONDAY_API_URL = "https://api.monday.com/v2";
-const API_KEY = process.env.MONDAY_API_KEY;
+exports.handler = async (event) => {
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, body: 'Method Not Allowed' };
+  }
 
-export const handler = async (event, context) => {
   try {
-    const body = JSON.parse(event.body);
-    const { itemId, boardId, parentColumn, subitemColumn } =
-      body.payload.inputFields;
+    const body = JSON.parse(event.body || '{}');
+    const inputFields = body.payload?.inputFields || body.inputFields || {};
 
-    // 1. Fetch parent item to get the new status value
-    const parentQuery = `
+    const {
+      boardId,           // parent board
+      itemId,            // the parent item that changed
+      columnId,          // parent status column (for reference)
+      newValue,          // the new status value (as stringified JSON)
+      subitemStatusColumn   // your custom field → the chosen subitem status column ID
+    } = inputFields;
+
+    if (!boardId || !itemId || !subitemStatusColumn || !newValue) {
+      return { statusCode: 400, body: 'Missing required input fields' };
+    }
+
+    // Parse the new status value (it comes as string from trigger)
+    let columnValue;
+    try {
+      columnValue = JSON.parse(newValue);
+    } catch (e) {
+      columnValue = { label: newValue };   // fallback if it's just a label
+    }
+
+    // 1. Get the subitems of this parent item
+    const query = `
       query {
-        items(ids: ${itemId}) {
-          column_values(ids: "${parentColumn}") {
-            id
-            text
-            value
-          }
+        items(ids: [${itemId}]) {
           subitems {
             id
+            board { id }
           }
         }
       }
     `;
 
-    const parentRes = await axios.post(
-      MONDAY_API_URL,
-      { query: parentQuery },
-      { headers: { Authorization: API_KEY } }
-    );
+    let response = await fetch('https://api.monday.com/v2', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': MONDAY_API_TOKEN
+      },
+      body: JSON.stringify({ query })
+    });
 
-    const parentData = parentRes.data.data.items[0];
-    const newStatusValue = parentData.column_values[0].value;
-    const subitems = parentData.subitems;
+    const result = await response.json();
+    const subitems = result.data?.items?.[0]?.subitems || [];
 
-    // 2. Update each subitem
-    for (const sub of subitems) {
-      const mutation = `
-        mutation {
-          change_simple_column_value(
-            item_id: ${sub.id},
-            column_id: "${subitemColumn}",
-            value: ${JSON.stringify(newStatusValue)}
-          ) {
-            id
-          }
-        }
-      `;
-
-      await axios.post(
-        MONDAY_API_URL,
-        { query: mutation },
-        { headers: { Authorization: API_KEY } }
-      );
+    if (subitems.length === 0) {
+      return { statusCode: 200, body: JSON.stringify({ message: 'No subitems found' }) };
     }
+
+    // 2. Update each subitem's chosen status column
+    const mutations = subitems.map(sub => `
+      change_column_value(
+        board_id: ${sub.board.id || boardId},
+        item_id: ${sub.id},
+        column_id: "${subitemStatusColumn}",
+        value: ${JSON.stringify(JSON.stringify(columnValue))}
+      ) {
+        id
+      }
+    `).join('\n');
+
+    const mutation = `mutation { ${mutations} }`;
+
+    response = await fetch('https://api.monday.com/v2', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': MONDAY_API_TOKEN
+      },
+      body: JSON.stringify({ query: mutation })
+    });
+
+    const mutationResult = await response.json();
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ ok: true })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        success: true,
+        updatedSubitems: subitems.length,
+        result: mutationResult
+      })
     };
 
-  } catch (err) {
-    console.error("Action handler error:", err);
-
+  } catch (error) {
+    console.error('Action error:', error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: err.message })
+      body: JSON.stringify({ error: error.message })
     };
   }
 };
