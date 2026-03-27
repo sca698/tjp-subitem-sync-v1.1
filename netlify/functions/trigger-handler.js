@@ -1,3 +1,5 @@
+const { getStore } = require("@netlify/blobs");
+
 exports.handler = async (event) => {
 
     // Step 1: Only allow POST requests
@@ -19,10 +21,28 @@ exports.handler = async (event) => {
         };
     }
 
-    // Step 4: Handle a real event (Calc Meth column changed)
+    // Step 4: Log the full payload so we can see what Monday sends
     console.log("Trigger received:", JSON.stringify(body, null, 2));
 
-    // Step 5: Acknowledge receipt to Monday
+    // Step 5: If this is a subscribe call, store the boardId
+    const integrationId = body.payload?.integrationId || body.payload?.webhookId;
+    const boardId = body.payload?.inputFields?.boardId || body.payload?.boardId;
+
+    console.log("Integration ID:", integrationId);
+    console.log("Board ID:", boardId);
+
+    // Step 6: Store the mapping if we have both values
+    if (integrationId && boardId) {
+        try {
+            const store = getStore("integration-board-map");
+            await store.set(String(integrationId), String(boardId));
+            console.log(`Stored mapping: integrationId ${integrationId} -> boardId ${boardId}`);
+        } catch (error) {
+            console.error("Error storing mapping:", error);
+        }
+    }
+
+    // Step 7: Acknowledge receipt to Monday
     return {
         statusCode: 200,
         body: JSON.stringify({ message: "Trigger received successfully" })

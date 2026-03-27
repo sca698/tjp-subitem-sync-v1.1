@@ -1,25 +1,15 @@
 const fetch = require("node-fetch");
+const { getStore } = require("@netlify/blobs");
 
 const MONDAY_API_URL = "https://api.monday.com/v2";
 const MONDAY_API_TOKEN = process.env.MONDAY_API_TOKEN;
 
-function decodeJWT(token) {
-    try {
-        const base64Payload = token.split('.')[1];
-        const payload = Buffer.from(base64Payload, 'base64').toString('utf8');
-        return JSON.parse(payload);
-    } catch (error) {
-        console.error("Failed to decode JWT:", error);
-        return null;
-    }
-}
-
-async function callMondayAPI(query, token) {
+async function callMondayAPI(query) {
     const response = await fetch(MONDAY_API_URL, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            "Authorization": token
+            "Authorization": MONDAY_API_TOKEN
         },
         body: JSON.stringify({ query })
     });
@@ -48,80 +38,41 @@ exports.handler = async (event) => {
         };
     }
 
-    // Step 4: Extract the short lived token from the JWT
-    const authHeader = event.headers.authorization;
-    const jwtPayload = decodeJWT(authHeader);
-    const shortLivedToken = jwtPayload?.shortLivedToken;
-
-    if (!shortLivedToken) {
-        console.error("No short lived token found");
-        return {
-            statusCode: 401,
-            body: JSON.stringify({ error: "No short lived token" })
-        };
-    }
-
-    // Step 5: Extract the integrationId from the payload
+    // Step 4: Extract the integrationId from the payload
     const integrationId = body.payload?.integrationId;
     console.log("Integration ID:", integrationId);
 
+    if (!integrationId) {
+        console.error("No integrationId found in payload");
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: "No integrationId provided" })
+        };
+    }
+
+    // Step 5: Look up the boardId from Netlify Blobs
+    let boardId = null;
     try {
-        // Step 6: Query Monday for boards that have subitems
-        // We query all non-subitem boards and find the one with our integration
-        const boardsQuery = `
-            query {
-                boards(limit: 100) {
-                    id
-                    name
-                    type
-                }
-            }
-        `;
+        const store = getStore("integration-board-map");
+        boardId = await store.get(String(integrationId));
+        console.log(`Retrieved boardId: ${boardId} for integrationId: ${integrationId}`);
+    } catch (error) {
+        console.error("Error retrieving boardId from store:", error);
+    }
 
-       const boardsData = await callMondayAPI(boardsQuery, MONDAY_API_TOKEN);
-        console.log("Boards response:", JSON.stringify(boardsData, null, 2));
+    if (!boardId) {
+        console.error("No boardId found for integrationId:", integrationId);
+        return {
+            statusCode: 200,
+            body: JSON.stringify([])
+        };
+    }
 
-        const boards = boardsData?.data?.boards || [];
-        console.log(`Found ${boards.length} boards`);
-
-        // Step 7: For each board find the one with our integrationId
-        // We do this by checking each board's integrations
-        let targetBoardId = null;
-
-        for (const board of boards) {
-            const integrationsQuery = `
-                query {
-                    boards(ids: ${board.id}) {
-                        integrations {
-                            id
-                        }
-                    }
-                }
-            `;
-
-            const intData = await callMondayAPI(integrationsQuery, MONDAY_API_TOKEN);
-            const integrations = intData?.data?.boards?.[0]?.integrations || [];
-            const match = integrations.find(i => String(i.id) === String(integrationId));
-
-            if (match) {
-                targetBoardId = board.id;
-                console.log(`Found matching board: ${board.id}`);
-                break;
-            }
-        }
-
-        if (!targetBoardId) {
-            console.error("Could not find board for integration");
-            return {
-                statusCode: 200,
-                body: JSON.stringify([])
-            };
-        }
-
-        // Step 8: Get the subitem board ID from the target board
+    try {
+        // Step 6: Get the subitem board ID from the parent board
         const subitemBoardQuery = `
             query {
-                boards(ids: ${targetBoardId}) {
+                boards(ids: ${boardId}) {
                     columns {
                         id
                         type
@@ -131,12 +82,14 @@ exports.handler = async (event) => {
             }
         `;
 
-        const subitemBoardData = await callMondayAPI(subitemBoardQuery, MONDAY_API_TOKEN);
+        const subitemBoardData = await callMondayAPI(subitemBoardQuery);
         const columns = subitemBoardData?.data?.boards?.[0]?.columns || [];
+        console.log("Columns found:", columns.length);
+
         const subitemColumn = columns.find(col => col.type === "subtasks");
 
         if (!subitemColumn) {
-            console.error("No subitem column found");
+            console.error("No subitem column found on board");
             return {
                 statusCode: 200,
                 body: JSON.stringify([])
@@ -145,16 +98,17 @@ exports.handler = async (event) => {
 
         const settings = JSON.parse(subitemColumn.settings_str);
         const subitemBoardId = settings.boardIds?.[0];
+        console.log("Subitem board ID:", subitemBoardId);
 
         if (!subitemBoardId) {
-            console.error("No subitem board ID found");
+            console.error("No subitem board ID found in settings");
             return {
                 statusCode: 200,
                 body: JSON.stringify([])
             };
         }
 
-        // Step 9: Query the subitem board for status columns
+        // Step 7: Query the subitem board for status columns
         const subitemColumnsQuery = `
             query {
                 boards(ids: ${subitemBoardId}) {
@@ -167,7 +121,7 @@ exports.handler = async (event) => {
             }
         `;
 
-        const subitemData = await callMondayAPI(subitemColumnsQuery, MONDAY_API_TOKEN);
+        const subitemData = await callMondayAPI(subitemColumnsQuery);
         const subitemColumns = subitemData?.data?.boards?.[0]?.columns || [];
         const statusColumns = subitemColumns.filter(col => col.type === "color");
 
@@ -184,10 +138,11 @@ exports.handler = async (event) => {
         };
 
     } catch (error) {
-        console.error("Error:", error);
+        console.error("Error fetching subitem columns:", error);
         return {
             statusCode: 500,
             body: JSON.stringify({ error: "Failed to fetch subitem columns" })
         };
     }
+
 };

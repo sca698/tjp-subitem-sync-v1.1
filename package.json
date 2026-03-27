@@ -6,6 +6,7 @@
     "start": "netlify dev"
   },
   "dependencies": {
+    "@netlify/blobs": "^10.7.4",
     "node-fetch": "^2.7.0"
   }
 }
