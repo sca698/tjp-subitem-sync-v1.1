@@ -32,7 +32,7 @@ exports.handler = async (event) => {
     }
 
     // Step 4: Extract the board ID from the payload
-    const boardId = body.data?.boardId;
+    const boardId = body.payload?.dependencyData?.boardId || body.payload?.boardId;
 
     if (!boardId) {
         return {
