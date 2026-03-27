@@ -34,7 +34,11 @@ exports.handler = async (event) => {
     // Step 6: Store the mapping if we have both values
     if (integrationId && boardId) {
         try {
-            const store = getStore("integration-board-map");
+            const store = getStore({
+                name: "integration-board-map",
+                siteID: process.env.NETLIFY_SITE_ID,
+                token: process.env.NETLIFY_TOKEN
+            });
             await store.set(String(integrationId), String(boardId));
             console.log(`Stored mapping: integrationId ${integrationId} -> boardId ${boardId}`);
         } catch (error) {

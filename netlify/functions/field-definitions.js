@@ -53,7 +53,11 @@ exports.handler = async (event) => {
     // Step 5: Look up the boardId from Netlify Blobs
     let boardId = null;
     try {
-        const store = getStore("integration-board-map");
+        const store = getStore({
+            name: "integration-board-map",
+            siteID: process.env.NETLIFY_SITE_ID,
+            token: process.env.NETLIFY_TOKEN
+        });
         boardId = await store.get(String(integrationId));
         console.log(`Retrieved boardId: ${boardId} for integrationId: ${integrationId}`);
     } catch (error) {
