@@ -1,6 +1,7 @@
 const fetch = require("node-fetch");
 
 const MONDAY_API_URL = "https://api.monday.com/v2";
+const MONDAY_API_TOKEN = process.env.MONDAY_API_TOKEN;
 
 function decodeJWT(token) {
     try {
@@ -77,7 +78,7 @@ exports.handler = async (event) => {
             }
         `;
 
-        const boardsData = await callMondayAPI(boardsQuery, shortLivedToken);
+       const boardsData = await callMondayAPI(boardsQuery, MONDAY_API_TOKEN);
         console.log("Boards response:", JSON.stringify(boardsData, null, 2));
 
         const boards = boardsData?.data?.boards || [];
@@ -98,7 +99,7 @@ exports.handler = async (event) => {
                 }
             `;
 
-            const intData = await callMondayAPI(integrationsQuery, shortLivedToken);
+            const intData = await callMondayAPI(integrationsQuery, MONDAY_API_TOKEN);
             const integrations = intData?.data?.boards?.[0]?.integrations || [];
             const match = integrations.find(i => String(i.id) === String(integrationId));
 
@@ -130,7 +131,7 @@ exports.handler = async (event) => {
             }
         `;
 
-        const subitemBoardData = await callMondayAPI(subitemBoardQuery, shortLivedToken);
+        const subitemBoardData = await callMondayAPI(subitemBoardQuery, MONDAY_API_TOKEN);
         const columns = subitemBoardData?.data?.boards?.[0]?.columns || [];
         const subitemColumn = columns.find(col => col.type === "subtasks");
 
@@ -166,7 +167,7 @@ exports.handler = async (event) => {
             }
         `;
 
-        const subitemData = await callMondayAPI(subitemColumnsQuery, shortLivedToken);
+        const subitemData = await callMondayAPI(subitemColumnsQuery, MONDAY_API_TOKEN);
         const subitemColumns = subitemData?.data?.boards?.[0]?.columns || [];
         const statusColumns = subitemColumns.filter(col => col.type === "color");
 
