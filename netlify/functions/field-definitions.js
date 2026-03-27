@@ -69,7 +69,7 @@ exports.handler = async (event) => {
         // We query all non-subitem boards and find the one with our integration
         const boardsQuery = `
             query {
-                boards(limit: 100, board_kind: public) {
+                boards(limit: 100) {
                     id
                     name
                     type
