@@ -1,11 +1,11 @@
 {
   "name": "tjp-subitem-sync",
   "version": "1.0.0",
+  "description": "Monday.com subitem sync application",
   "scripts": {
-    "start": "node index.js"
+    "start": "netlify dev"
   },
   "dependencies": {
-    "axios": "^1.13.6",
     "node-fetch": "^2.7.0"
   }
 }

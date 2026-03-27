@@ -1,105 +1,126 @@
-// netlify/functions/action-update-subitem-status.js
-const fetch = require('node-fetch');
+const fetch = require("node-fetch");
 
+// Monday API configuration
+const MONDAY_API_URL = "https://api.monday.com/v2";
 const MONDAY_API_TOKEN = process.env.MONDAY_API_TOKEN;
 
+// Helper function to call Monday's GraphQL API
+async function callMondayAPI(query) {
+    const response = await fetch(MONDAY_API_URL, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": MONDAY_API_TOKEN
+        },
+        body: JSON.stringify({ query })
+    });
+    return response.json();
+}
+
 exports.handler = async (event) => {
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: 'Method Not Allowed' };
-  }
 
-  try {
-    const body = JSON.parse(event.body || '{}');
-    const inputFields = body.payload?.inputFields || body.inputFields || {};
-
-    const {
-      boardId,           // parent board
-      itemId,            // the parent item that changed
-      columnId,          // parent status column (for reference)
-      newValue,          // the new status value (as stringified JSON)
-      subitemStatusColumn   // your custom field → the chosen subitem status column ID
-    } = inputFields;
-
-    if (!boardId || !itemId || !subitemStatusColumn || !newValue) {
-      return { statusCode: 400, body: 'Missing required input fields' };
+    // Step 1: Only allow POST requests
+    if (event.httpMethod !== "POST") {
+        return {
+            statusCode: 405,
+            body: JSON.stringify({ error: "Method not allowed" })
+        };
     }
 
-    // Parse the new status value (it comes as string from trigger)
-    let columnValue;
+    // Step 2: Parse the incoming request body
+    const body = JSON.parse(event.body);
+
+    // Step 3: Handle Monday's challenge request
+    if (body.challenge) {
+        return {
+            statusCode: 200,
+            body: JSON.stringify({ challenge: body.challenge })
+        };
+    }
+
+    // Step 4: Extract the payload values we need
+    const itemId = body.payload?.inputFields?.itemId;
+    const boardId = body.payload?.inputFields?.boardId;
+    const newStatusIndex = body.payload?.inputFields?.columnValue?.index;
+    const subitemColumnId = body.payload?.inputFields?.subitemColumnId;
+
+    console.log("Action received:", JSON.stringify(body, null, 2));
+
+    // Step 5: Validate we have everything we need
+    if (!itemId || !boardId || newStatusIndex === undefined || !subitemColumnId) {
+        console.error("Missing required fields:", { itemId, boardId, newStatusIndex, subitemColumnId });
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: "Missing required fields" })
+        };
+    }
+
     try {
-      columnValue = JSON.parse(newValue);
-    } catch (e) {
-      columnValue = { label: newValue };   // fallback if it's just a label
-    }
+        // Step 6: Query Monday for all subitems of the parent item
+        const subitemsQuery = `
+            query {
+                items(ids: ${itemId}) {
+                    subitems {
+                        id
+                        name
+                        board {
+                            id
+                        }
+                    }
+                }
+            }
+        `;
 
-    // 1. Get the subitems of this parent item
-    const query = `
-      query {
-        items(ids: [${itemId}]) {
-          subitems {
-            id
-            board { id }
-          }
+        const subitemsData = await callMondayAPI(subitemsQuery);
+        const subitems = subitemsData?.data?.items?.[0]?.subitems || [];
+
+        console.log(`Found ${subitems.length} subitems for item ${itemId}`);
+
+        // Step 7: If no subitems found, exit gracefully
+        if (subitems.length === 0) {
+            return {
+                statusCode: 200,
+                body: JSON.stringify({ message: "No subitems found" })
+            };
         }
-      }
-    `;
 
-    let response = await fetch('https://api.monday.com/v2', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': MONDAY_API_TOKEN
-      },
-      body: JSON.stringify({ query })
-    });
+        // Step 8: Update each subitem's status column
+        for (const subitem of subitems) {
+            const columnValue = JSON.stringify(
+                JSON.stringify({ index: newStatusIndex })
+            );
 
-    const result = await response.json();
-    const subitems = result.data?.items?.[0]?.subitems || [];
+            const updateMutation = `
+                mutation {
+                    change_column_value(
+                        item_id: ${subitem.id},
+                        board_id: ${subitem.board.id},
+                        column_id: "${subitemColumnId}",
+                        value: ${columnValue}
+                    ) {
+                        id
+                    }
+                }
+            `;
 
-    if (subitems.length === 0) {
-      return { statusCode: 200, body: JSON.stringify({ message: 'No subitems found' }) };
+            const updateResult = await callMondayAPI(updateMutation);
+            console.log(`Updated subitem ${subitem.id}:`, JSON.stringify(updateResult));
+        }
+
+        // Step 9: Return success
+        return {
+            statusCode: 200,
+            body: JSON.stringify({
+                message: `Successfully updated ${subitems.length} subitems`
+            })
+        };
+
+    } catch (error) {
+        console.error("Error in action handler:", error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: "Failed to update subitems" })
+        };
     }
 
-    // 2. Update each subitem's chosen status column
-    const mutations = subitems.map(sub => `
-      change_column_value(
-        board_id: ${sub.board.id || boardId},
-        item_id: ${sub.id},
-        column_id: "${subitemStatusColumn}",
-        value: ${JSON.stringify(JSON.stringify(columnValue))}
-      ) {
-        id
-      }
-    `).join('\n');
-
-    const mutation = `mutation { ${mutations} }`;
-
-    response = await fetch('https://api.monday.com/v2', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': MONDAY_API_TOKEN
-      },
-      body: JSON.stringify({ query: mutation })
-    });
-
-    const mutationResult = await response.json();
-
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        success: true,
-        updatedSubitems: subitems.length,
-        result: mutationResult
-      })
-    };
-
-  } catch (error) {
-    console.error('Action error:', error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: error.message })
-    };
-  }
 };
