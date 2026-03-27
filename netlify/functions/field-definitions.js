@@ -6,7 +6,11 @@ const MONDAY_API_TOKEN = process.env.MONDAY_API_TOKEN;
 exports.handler = async (event) => {
 
     // Step 1: Only allow POST requests
-    if (event.httpMethod !== "POST") {
+    console.log("HTTP Method:", event.httpMethod);
+    console.log("Headers:", JSON.stringify(event.headers, null, 2));
+    console.log("Body:", event.body);
+
+    if (event.httpMethod !== "POST" && event.httpMethod !== "GET") {
         return {
             statusCode: 405,
             body: JSON.stringify({ error: "Method not allowed" })
@@ -15,6 +19,9 @@ exports.handler = async (event) => {
 
     // Step 2: Parse the incoming request body
     const body = JSON.parse(event.body);
+
+    console.log("Full payload received:", JSON.stringify(body, null, 2));
+    console.log("Full event received:", JSON.stringify(event, null, 2));
 
     // Step 3: Handle Monday's challenge request
     if (body.challenge) {
