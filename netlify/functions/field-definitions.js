@@ -1,16 +1,34 @@
 const fetch = require("node-fetch");
 
 const MONDAY_API_URL = "https://api.monday.com/v2";
-const MONDAY_API_TOKEN = process.env.MONDAY_API_TOKEN;
+
+function decodeJWT(token) {
+    try {
+        const base64Payload = token.split('.')[1];
+        const payload = Buffer.from(base64Payload, 'base64').toString('utf8');
+        return JSON.parse(payload);
+    } catch (error) {
+        console.error("Failed to decode JWT:", error);
+        return null;
+    }
+}
+
+async function callMondayAPI(query, token) {
+    const response = await fetch(MONDAY_API_URL, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": token
+        },
+        body: JSON.stringify({ query })
+    });
+    return response.json();
+}
 
 exports.handler = async (event) => {
 
     // Step 1: Only allow POST requests
-    console.log("HTTP Method:", event.httpMethod);
-    console.log("Headers:", JSON.stringify(event.headers, null, 2));
-    console.log("Body:", event.body);
-
-    if (event.httpMethod !== "POST" && event.httpMethod !== "GET") {
+    if (event.httpMethod !== "POST") {
         return {
             statusCode: 405,
             body: JSON.stringify({ error: "Method not allowed" })
@@ -19,9 +37,7 @@ exports.handler = async (event) => {
 
     // Step 2: Parse the incoming request body
     const body = JSON.parse(event.body);
-
-    console.log("Full payload received:", JSON.stringify(body, null, 2));
-    console.log("Full event received:", JSON.stringify(event, null, 2));
+    console.log("Payload received:", JSON.stringify(body, null, 2));
 
     // Step 3: Handle Monday's challenge request
     if (body.challenge) {
@@ -31,21 +47,80 @@ exports.handler = async (event) => {
         };
     }
 
-    // Step 4: Extract the board ID from the payload
-    const boardId = body.payload?.dependencyData?.boardId || body.payload?.boardId;
+    // Step 4: Extract the short lived token from the JWT
+    const authHeader = event.headers.authorization;
+    const jwtPayload = decodeJWT(authHeader);
+    const shortLivedToken = jwtPayload?.shortLivedToken;
 
-    if (!boardId) {
+    if (!shortLivedToken) {
+        console.error("No short lived token found");
         return {
-            statusCode: 400,
-            body: JSON.stringify({ error: "No board ID provided" })
+            statusCode: 401,
+            body: JSON.stringify({ error: "No short lived token" })
         };
     }
 
+    // Step 5: Extract the integrationId from the payload
+    const integrationId = body.payload?.integrationId;
+    console.log("Integration ID:", integrationId);
+
     try {
-        // Step 5: Query Monday for the subitem board ID
+        // Step 6: Query Monday for boards that have subitems
+        // We query all non-subitem boards and find the one with our integration
+        const boardsQuery = `
+            query {
+                boards(limit: 100, board_kind: public) {
+                    id
+                    name
+                    type
+                }
+            }
+        `;
+
+        const boardsData = await callMondayAPI(boardsQuery, shortLivedToken);
+        console.log("Boards response:", JSON.stringify(boardsData, null, 2));
+
+        const boards = boardsData?.data?.boards || [];
+        console.log(`Found ${boards.length} boards`);
+
+        // Step 7: For each board find the one with our integrationId
+        // We do this by checking each board's integrations
+        let targetBoardId = null;
+
+        for (const board of boards) {
+            const integrationsQuery = `
+                query {
+                    boards(ids: ${board.id}) {
+                        integrations {
+                            id
+                        }
+                    }
+                }
+            `;
+
+            const intData = await callMondayAPI(integrationsQuery, shortLivedToken);
+            const integrations = intData?.data?.boards?.[0]?.integrations || [];
+            const match = integrations.find(i => String(i.id) === String(integrationId));
+
+            if (match) {
+                targetBoardId = board.id;
+                console.log(`Found matching board: ${board.id}`);
+                break;
+            }
+        }
+
+        if (!targetBoardId) {
+            console.error("Could not find board for integration");
+            return {
+                statusCode: 200,
+                body: JSON.stringify([])
+            };
+        }
+
+        // Step 8: Get the subitem board ID from the target board
         const subitemBoardQuery = `
             query {
-                boards(ids: ${boardId}) {
+                boards(ids: ${targetBoardId}) {
                     columns {
                         id
                         type
@@ -55,24 +130,12 @@ exports.handler = async (event) => {
             }
         `;
 
-        const response = await fetch(MONDAY_API_URL, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": MONDAY_API_TOKEN
-            },
-            body: JSON.stringify({ query: subitemBoardQuery })
-        });
-
-        const data = await response.json();
-        console.log("Board query response:", JSON.stringify(data, null, 2));
-
-        // Step 6: Find the subitem board ID from settings_str
-        const columns = data?.data?.boards?.[0]?.columns || [];
+        const subitemBoardData = await callMondayAPI(subitemBoardQuery, shortLivedToken);
+        const columns = subitemBoardData?.data?.boards?.[0]?.columns || [];
         const subitemColumn = columns.find(col => col.type === "subtasks");
-        
+
         if (!subitemColumn) {
-            console.error("No subitem column found on board");
+            console.error("No subitem column found");
             return {
                 statusCode: 200,
                 body: JSON.stringify([])
@@ -83,14 +146,14 @@ exports.handler = async (event) => {
         const subitemBoardId = settings.boardIds?.[0];
 
         if (!subitemBoardId) {
-            console.error("No subitem board ID found in settings");
+            console.error("No subitem board ID found");
             return {
                 statusCode: 200,
                 body: JSON.stringify([])
             };
         }
 
-        // Step 7: Query the subitem board for status columns
+        // Step 9: Query the subitem board for status columns
         const subitemColumnsQuery = `
             query {
                 boards(ids: ${subitemBoardId}) {
@@ -103,30 +166,16 @@ exports.handler = async (event) => {
             }
         `;
 
-        const subitemResponse = await fetch(MONDAY_API_URL, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": MONDAY_API_TOKEN
-            },
-            body: JSON.stringify({ query: subitemColumnsQuery })
-        });
-
-        const subitemData = await subitemResponse.json();
-        console.log("Subitem board query response:", JSON.stringify(subitemData, null, 2));
-
+        const subitemData = await callMondayAPI(subitemColumnsQuery, shortLivedToken);
         const subitemColumns = subitemData?.data?.boards?.[0]?.columns || [];
-
-        // Step 8: Filter to status columns only
         const statusColumns = subitemColumns.filter(col => col.type === "color");
 
-        // Step 9: Format the response for Monday's recipe builder
         const options = statusColumns.map(col => ({
             value: col.id,
             title: col.title
         }));
 
-        console.log("Returning status columns:", JSON.stringify(options, null, 2));
+        console.log("Returning options:", JSON.stringify(options, null, 2));
 
         return {
             statusCode: 200,
@@ -134,11 +183,10 @@ exports.handler = async (event) => {
         };
 
     } catch (error) {
-        console.error("Error fetching subitem columns:", error);
+        console.error("Error:", error);
         return {
             statusCode: 500,
             body: JSON.stringify({ error: "Failed to fetch subitem columns" })
         };
     }
-
 };
