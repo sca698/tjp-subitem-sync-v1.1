@@ -39,10 +39,10 @@ exports.handler = async (event) => {
     }
 
     // Step 4: Extract the payload values we need
-        const itemId = body.payload?.inputFields?.itemId;
-        const boardId = body.payload?.inputFields?.boardId;
-        const newStatusIndex = body.payload?.inputFields?.statusColumnValue?.index;
-        const subitemColumnId = body.payload?.inputFields?.subitemColumnId;
+        const itemId = body.payload?.inboundFieldValues?.itemId;
+        const boardId = body.payload?.inboundFieldValues?.boardId;
+        const newStatusIndex = body.payload?.inboundFieldValues?.statusColumnValue;
+        const subitemColumnId = body.payload?.inboundFieldValues?.subitemColumnId;
 
     console.log("Action received:", JSON.stringify(body, null, 2));
 
