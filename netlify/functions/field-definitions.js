@@ -22,13 +22,13 @@ exports.handler = async (event) => {
     }
 
     const body = JSON.parse(event.body);
-    console.log("Payload received:", JSON.stringify(body, null, 2));
+    console.log("Full body:", JSON.stringify(body, null, 2));
 
     if (body.challenge) {
         return { statusCode: 200, body: JSON.stringify({ challenge: body.challenge }) };
     }
 
-    const boardId = body.payload?.inboundFieldValues?.boardId;
+    const boardId = body.payload?.dependencyData?.boardId?.value;
     if (!boardId) {
         console.error("No boardId found in payload");
         return { statusCode: 400, body: JSON.stringify({ error: "No boardId provided" }) };
