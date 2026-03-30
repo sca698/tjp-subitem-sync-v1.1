@@ -42,13 +42,13 @@ exports.handler = async (event) => {
         const itemId = body.payload?.inboundFieldValues?.itemId;
         const boardId = body.payload?.inboundFieldValues?.boardId;
         const newStatusIndex = body.payload?.inboundFieldValues?.statusColumnValue;
-        const subitemColumnId = body.payload?.inboundFieldValues?.subitemColumnId;
+        const subitemStatusColumnId = body.payload?.inboundFieldValues?.subitemStatusColumnId;
 
     console.log("Action received:", JSON.stringify(body, null, 2));
 
     // Step 5: Validate we have everything we need
-    if (!itemId || !boardId || newStatusIndex === undefined || !subitemColumnId) {
-        console.error("Missing required fields:", { itemId, boardId, newStatusIndex, subitemColumnId });
+    if (!itemId || !boardId || newStatusIndex === undefined || !subitemStatusColumnId) {
+        console.error("Missing required fields:", { itemId, boardId, newStatusIndex, subitemStatusColumnId });
         return {
             statusCode: 400,
             body: JSON.stringify({ error: "Missing required fields" })
@@ -95,7 +95,7 @@ exports.handler = async (event) => {
                     change_column_value(
                         item_id: ${subitem.id},
                         board_id: ${subitem.board.id},
-                        column_id: "${subitemColumnId}",
+                        column_id: "${subitemStatusColumnId}",
                         value: ${columnValue}
                     ) {
                         id
