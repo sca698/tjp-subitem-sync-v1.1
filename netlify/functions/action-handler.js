@@ -86,15 +86,15 @@ exports.handler = async (event) => {
 
         // Step 8: Update each subitem's status column
         for (const subitem of subitems) {
-            const columnValue = JSON.stringify({ index: newStatusIndex });
+            const columnValue = String(newStatusIndex);
 
             const updateMutation = `
                 mutation {
-                    change_column_value(
+                    change_simple_column_value(
                         item_id: ${subitem.id},
                         board_id: ${subitem.board.id},
                         column_id: "${subitemStatusColumnId}",
-                        value: ${JSON.stringify(columnValue)}
+                        value: "${columnValue}"
                     ) {
                         id
                     }
